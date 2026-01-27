@@ -28,27 +28,18 @@ Följ dessa steg för att köra scriptet i bakgrunden:
 [Unit]
 
 Description=P1 Monitor Pro Service
-
 After=network.target
 
 [Service]
 
 User=pi
-
 Group=pi
-
 WorkingDirectory=/home/pi
-
 ExecStart=/usr/bin/python3 /home/pi/p1-server.py
-
 Restart=always
-
 RestartSec=5
-
 StandardOutput=inherit
-
 StandardError=inherit
-
 
 [Install]
 
