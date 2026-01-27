@@ -24,6 +24,7 @@ Följ dessa steg för att köra scriptet i bakgrunden:
 2. Klistra in följande konfiguration i filen:
 
 --------------------------------------------------
+
 [Unit]
 Description=P1 Monitor Pro Service
 After=network.target
@@ -40,6 +41,7 @@ StandardError=inherit
 
 [Install]
 WantedBy=multi-user.target
+
 --------------------------------------------------
 
 
