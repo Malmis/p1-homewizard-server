@@ -27,11 +27,9 @@ DB_PATH = "p1.db"
 HOST = "0.0.0.0"
 PORT = 8000
 
-# Gränsvärden för grafen
 PHASE_LIMIT_A = 16  
 VOLT_LOW = 207      
 VOLT_HIGH = 253     
-VOLT_NOM = 230      
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -158,74 +156,119 @@ INDEX_TEMPLATE = r"""<!doctype html>
 <html lang="sv">
 <head>
   <meta charset="utf-8">
-  <title>P1 Monitor Pro</title>
+  <title>P1 Monitor Pro + Pie</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
   <script src="https://cdn.jsdelivr.net/npm/date-fns@3.6.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
   <style>
-    body { font-family: 'Segoe UI', sans-serif; margin: 1.5rem; background: #f8f9fa; }
-    .wrap { max-width: 1300px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-    .controls { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
-    button, .btn { padding: 8px 15px; border: 1px solid #ccc; background: #fff; cursor: pointer; border-radius: 5px; text-decoration: none; color: #000; font-size: 14px; }
+    body { font-family: 'Segoe UI', sans-serif; margin: 1.5rem; background: #f8f9fa; color: #333; }
+    .container { max-width: 1300px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
+    .header { display: flex; justify-content: space-between; align-items: center; }
+    .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    button, .btn { padding: 8px 15px; border: 1px solid #ccc; background: #fff; cursor: pointer; border-radius: 5px; text-decoration: none; color: #333; font-size: 14px; transition: 0.2s; }
+    button:hover, .btn:hover { background: #f0f0f0; }
     button.active { background: #007bff; color: #fff; border-color: #0056b3; }
-    #btnReset { margin-left: auto; background: #ffeded; color: #c00; }
-    #chart-container { height: 500px; width: 100%; }
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-top: 20px; }
+    
+    .main-grid { display: grid; grid-template-columns: 1fr 350px; gap: 20px; }
+    @media (max-width: 1000px) { .main-grid { grid-template-columns: 1fr; } }
+
+    #chart-container { height: 450px; width: 100%; }
+    #pie-container { height: 300px; width: 100%; position: relative; }
+    
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
     .stat-card { background: #f1f3f5; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #dee2e6; }
-    .stat-val { font-size: 1.3rem; font-weight: bold; display: block; margin-top: 5px; color: #2d3748; }
-    .stat-label { font-size: 0.75rem; color: #666; text-transform: uppercase; font-weight: bold; }
+    .stat-val { font-size: 1.2rem; font-weight: bold; display: block; margin-top: 5px; }
+    .stat-label { font-size: 0.7rem; color: #666; text-transform: uppercase; letter-spacing: 1px; }
     .good { color: #1a7f37; } .warn { color: #a15b00; } .bad { color: #c62828; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h2>Energimonitor P1</h2>
-    <div class="controls">
-      <button onclick="changeRange(1, this)" class="active">1h</button>
-      <button onclick="changeRange(6, this)">6h</button>
-      <button onclick="changeRange(24, this)">24h</button>
-      <button onclick="changeRange(168, this)">7d</button>
-      <a href="/api/export.csv?hours=24&sep=%3B&decimal=comma" class="btn">Exportera CSV (Excel)</a>
-      <button id="btnReset" onclick="resetZoom()">Återställ Zoom</button>
+  <div class="container">
+    <div class="card header">
+      <h2 style="margin:0">Energimonitor P1</h2>
+      <div class="controls">
+        <button onclick="changeRange(1, this)" class="active">1h</button>
+        <button onclick="changeRange(6, this)">6h</button>
+        <button onclick="changeRange(24, this)">24h</button>
+        <a href="/api/export.csv?hours=24&sep=%3B&decimal=comma" class="btn">Exportera CSV</a>
+        <button id="btnReset" onclick="resetZoom()">Återställ Zoom</button>
+      </div>
     </div>
-    <div id="chart-container"><canvas id="chart"></canvas></div>
+
+    <div class="main-grid">
+      <div class="card">
+        <div id="chart-container"><canvas id="chart"></canvas></div>
+      </div>
+      <div class="card" style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
+        <h4 style="margin-top:0">Fasfördelning (Just nu)</h4>
+        <div id="pie-container"><canvas id="pieChart"></canvas></div>
+        <p id="total-a-label" style="font-weight:bold; margin-top:15px; color:#666">Totalt: - A</p>
+      </div>
+    </div>
+
     <div class="stats">
       <div class="stat-card"><span class="stat-label">Effekt</span><span id="val-w" class="stat-val">- W</span></div>
       <div class="stat-card"><span class="stat-label">Ström (L1/L2/L3)</span><span id="val-a" class="stat-val">- A</span></div>
-      <div class="stat-card"><span class="stat-label">Spänning (L1/L2/L3)</span><span id="val-v" class="stat-val">- V</span></div>
+      <div class="stat-card"><span class="stat-label">Spänning</span><span id="val-v" class="stat-val">- V</span></div>
       <div class="stat-card"><span class="stat-label">Obalans</span><span id="val-ob" class="stat-val">-</span></div>
     </div>
   </div>
 
   <script>
     const P1CFG = { limitA: {{ phase_limit_a }}, vLow: {{ volt_low }}, vHigh: {{ volt_high }} };
-    let chart;
+    let chart, pieChart;
     const ctx = document.getElementById('chart').getContext('2d');
+    const pieCtx = document.getElementById('pieChart').getContext('2d');
 
     function updateStats(msg) {
       document.getElementById('val-w').textContent = Math.round(msg.active_power_w) + ' W';
-      document.getElementById('val-a').textContent = `${(msg.active_current_l1_a||0).toFixed(1)} / ${(msg.active_current_l2_a||0).toFixed(1)} / ${(msg.active_current_l3_a||0).toFixed(1)} A`;
-      document.getElementById('val-v').textContent = `${Math.round(msg.voltage_l1_v||0)} / ${Math.round(msg.voltage_l2_v||0)} / ${Math.round(msg.voltage_l3_v||0)} V`;
+      document.getElementById('val-a').textContent = `${msg.active_current_l1_a.toFixed(1)} / ${msg.active_current_l2_a.toFixed(1)} / ${msg.active_current_l3_a.toFixed(1)} A`;
+      document.getElementById('val-v').textContent = `${Math.round(msg.voltage_l1_v)} / ${Math.round(msg.voltage_l2_v)} / ${Math.round(msg.voltage_l3_v)} V`;
+      document.getElementById('total-a-label').textContent = `Totalt: ${msg.total_current_a.toFixed(1)} A`;
+      
       const obPct = msg.imbalance_pct || 0;
       const obEl = document.getElementById('val-ob');
-      obEl.textContent = (msg.imbalance_a || 0).toFixed(1) + ' A (' + obPct.toFixed(0) + '%)';
+      obEl.textContent = `${msg.imbalance_a.toFixed(1)} A (${obPct.toFixed(0)}%)`;
       obEl.className = 'stat-val ' + (obPct > 20 ? 'bad' : obPct > 10 ? 'warn' : 'good');
+
+      // Uppdatera Pie Chart
+      if(pieChart) {
+        pieChart.data.datasets[0].data = [msg.active_current_l1_a, msg.active_current_l2_a, msg.active_current_l3_a];
+        pieChart.update('none');
+      }
+    }
+
+    function initPie() {
+      pieChart = new Chart(pieCtx, {
+        type: 'doughnut',
+        data: {
+          labels: ['L1', 'L2', 'L3'],
+          datasets: [{
+            data: [0, 0, 0],
+            backgroundColor: ['#dc2626', '#16a34a', '#9333ea'],
+            borderWidth: 2,
+            hoverOffset: 10
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${ctx.raw.toFixed(1)} A` } } },
+          cutout: '60%'
+        }
+      });
     }
 
     function getThresholds(points) {
         if(!points.length) return [];
-        const start = new Date(points[0].x);
-        const end = new Date(points[points.length-1].x);
+        const start = points[0].x, end = points[points.length-1].x;
         const line = (label, val, axis, color) => ({
             label, data: [{x:start, y:val}, {x:end, y:val}], 
             borderColor: color, borderWidth: 1, borderDash: [5,5], pointRadius: 0, fill: false, yAxisID: axis
         });
-        return [
-            line(`Gräns ${P1CFG.limitA}A`, P1CFG.limitA, 'yA', '#ff0000'),
-            line(`V Låg ${P1CFG.vLow}V`, P1CFG.vLow, 'yV', '#999'),
-            line(`V Hög ${P1CFG.vHigh}V`, P1CFG.vHigh, 'yV', '#999')
-        ];
+        return [line(`Gräns ${P1CFG.limitA}A`, P1CFG.limitA, 'yA', '#ff0000'), line(`V Låg`, P1CFG.vLow, 'yV', '#999'), line(`V Hög`, P1CFG.vHigh, 'yV', '#999')];
     }
 
     async function initChart(hours) {
@@ -239,7 +282,7 @@ INDEX_TEMPLATE = r"""<!doctype html>
         { label: 'L1 (A)', data: chartPoints.map(d=>({x:d.x, y:d.p.active_current_l1_a})), borderColor: '#dc2626', yAxisID: 'yA', pointRadius: 0, borderWidth: 1.5 },
         { label: 'L2 (A)', data: chartPoints.map(d=>({x:d.x, y:d.p.active_current_l2_a})), borderColor: '#16a34a', yAxisID: 'yA', pointRadius: 0, borderWidth: 1.5 },
         { label: 'L3 (A)', data: chartPoints.map(d=>({x:d.x, y:d.p.active_current_l3_a})), borderColor: '#9333ea', yAxisID: 'yA', pointRadius: 0, borderWidth: 1.5 },
-        { label: 'L1 (V)', data: chartPoints.map(d=>({x:d.x, y:d.p.voltage_l1_v})), borderColor: '#2563eb', yAxisID: 'yV', pointRadius: 0, borderWidth: 1, borderDash: [2,2], hidden: true },
+        { label: 'L1 (V)', data: chartPoints.map(d=>({x:d.x, y:d.p.voltage_l1_v})), borderColor: '#dc2626', yAxisID: 'yV', pointRadius: 0, borderWidth: 1, borderDash: [2,2], hidden: true },
         { label: 'L2 (V)', data: chartPoints.map(d=>({x:d.x, y:d.p.voltage_l2_v})), borderColor: '#16a34a', yAxisID: 'yV', pointRadius: 0, borderWidth: 1, borderDash: [2,2], hidden: true },
         { label: 'L3 (V)', data: chartPoints.map(d=>({x:d.x, y:d.p.voltage_l3_v})), borderColor: '#9333ea', yAxisID: 'yV', pointRadius: 0, borderWidth: 1, borderDash: [2,2], hidden: true }
       ];
@@ -270,7 +313,6 @@ INDEX_TEMPLATE = r"""<!doctype html>
       btn.classList.add('active');
       initChart(h);
     }
-
     function resetZoom() { if(chart) chart.resetZoom(); }
 
     const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws');
@@ -283,13 +325,13 @@ INDEX_TEMPLATE = r"""<!doctype html>
         chart.data.datasets[1].data.push({x: t, y: msg.active_current_l1_a});
         chart.data.datasets[2].data.push({x: t, y: msg.active_current_l2_a});
         chart.data.datasets[3].data.push({x: t, y: msg.active_current_l3_a});
-        // Uppdatera tröskellinjernas slutpunkt så de följer med live
         for(let j=7; j<10; j++) if(chart.data.datasets[j]) chart.data.datasets[j].data[1].x = t;
         chart.update('none');
       }
     };
     window.addEventListener('load', () => { 
         if (window['chartjs-plugin-zoom']) Chart.register(window['chartjs-plugin-zoom']);
+        initPie();
         initChart(1); 
     });
   </script>
@@ -311,25 +353,14 @@ def api_export_csv():
     hours = request.args.get("hours", 24, type=int)
     sep = request.args.get("sep", ";")
     decimal_comma = request.args.get("decimal") == "comma"
-    
     points = query_series(datetime.now(timezone.utc) - timedelta(hours=hours), False)
-    
     def generate():
-        # Uppdaterad header med obalans
         yield sep.join(["Tid", "Effekt_W", "L1_A", "L2_A", "L3_A", "L1_V", "L2_V", "L3_V", "Obalans_A", "Obalans_Pct"]) + "\n"
         for p in points:
-            vals = [
-                p['ts'], p['active_power_w'], 
-                p['active_current_l1_a'], p['active_current_l2_a'], p['active_current_l3_a'], 
-                p['voltage_l1_v'], p['voltage_l2_v'], p['voltage_l3_v'],
-                p['imbalance_a'], p['imbalance_pct']
-            ]
-            # Formatera för Excel om begärt
+            vals = [p['ts'], p['active_power_w'], p['active_current_l1_a'], p['active_current_l2_a'], p['active_current_l3_a'], p['voltage_l1_v'], p['voltage_l2_v'], p['voltage_l3_v'], p['imbalance_a'], p['imbalance_pct']]
             row = [str(v).replace('.', ',') if decimal_comma and isinstance(v, float) else str(v) for v in vals]
             yield sep.join(row) + "\n"
-            
-    return Response(stream_with_context(generate()), mimetype="text/csv", 
-                    headers={"Content-Disposition": f"attachment; filename=p1_export_{hours}h.csv"})
+    return Response(stream_with_context(generate()), mimetype="text/csv", headers={"Content-Disposition": f"attachment; filename=p1_export_{hours}h.csv"})
 
 @sock.route("/ws")
 def ws_route(ws):
@@ -352,5 +383,5 @@ if __name__ == "__main__":
     init_db()
     threading.Thread(target=collector_loop, daemon=True).start()
     local_ip = get_ip()
-    print(f"\n{'='*50}\n P1 MONITOR PRO STARTAD\n Adress: http://{local_ip}:{PORT}\n{'='*50}\n")
+    print(f"\n{'='*50}\n P1 MONITOR PRO + PIE STARTAD\n Adress: http://{local_ip}:{PORT}\n{'='*50}\n")
     app.run(host=HOST, port=PORT, threaded=True)
