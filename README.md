@@ -1,41 +1,59 @@
-# ⚡ Energimonitor P1
+# ⚡ P1 Monitor Pro + Pie
 
-En kraftfull monitor för din HomeWizard P1-mätare. Systemet loggar elförbrukning i en lokal SQLite-databas och visar realtidsdata via en webbpanel.
+En komplett lösning för att övervaka din elförbrukning via en HomeWizard P1-mätare. Systemet loggar data lokalt till en SQLite-databas och presenterar insikter via en interaktiv webbpanel.
 
 ## ✨ Funktioner
 
-* Realtidsövervakning: Se effekt (W), ström (A) och spänning (V) live.
-* Historik & Zoom: Utforska data för 1h, 6h, 24h eller 7 dagar.
-* Obalansvarning: Beräknar snedbelastning mellan faser (L1, L2, L3).
-* Gränsvärden: Visuella linjer för huvudsäkring och spänningsnivåer.
-* Excel-export: CSV-export optimerad för svenska Excel-inställningar.
+* Live Dashboard: Realtidsuppdatering av effekt, ström och spänning.
+* Fasfördelning: Cirkeldiagram som visar belastningen på L1, L2 och L3.
+* Obalansanalys: Beräknar automatiskt snedbelastning mellan faserna.
+* Excel-export: CSV-export optimerad för svenska inställningar.
 
-## 🚀 Installation
+## 📦 Python-moduler som krävs
 
-### 1. Förutsättningar
-Du behöver ha Python 3.7+ installerat på din dator eller Raspberry Pi.
-
-### 2. Installera bibliotek
-Öppna din terminal och kör följande kommando:
+Installera dessa via terminalen:
 pip install Flask==3.0.0 flask-sock==0.7.0 requests==2.31.0
 
-### 3. Konfiguration
-Öppna p1-server.py och kontrollera dessa variabler längst upp i filen:
-- P1_IP: Ange IP-adressen till din HomeWizard P1-mätare.
-- PHASE_LIMIT_A: Ange storleken på din huvudsäkring (t.ex. 16, 20 eller 25).
+## 🛠 Installation som tjänst (Linux/systemd)
 
-## 🛠 Användning
+Följ dessa steg för att köra scriptet i bakgrunden:
 
-1. Starta scriptet:
-   python p1-server.py
+1. Skapa service-filen:
+   sudo nano /etc/systemd/system/p1monitor.service
 
-2. Öppna webbläsaren:
-   Gå till http://localhost:8000 (eller den IP-adress som visas i terminalen).
+2. Klistra in följande konfiguration i filen:
 
-## 📊 Data och Export
+--------------------------------------------------
+[Unit]
+Description=P1 Monitor Pro Service
+After=network.target
 
-* Databas: All data lagras i filen p1.db.
-* Export: Klicka på "Exportera CSV" i webbgränssnittet för att ladda ner historik. Filen använder semikolon som separator för att fungera direkt i svenska Excel.
+[Service]
+User=pi
+Group=pi
+WorkingDirectory=/home/pi
+ExecStart=/usr/bin/python3 /home/pi/p1-server.py
+Restart=always
+RestartSec=5
+StandardOutput=inherit
+StandardError=inherit
+
+[Install]
+WantedBy=multi-user.target
+--------------------------------------------------
+
+
+
+3. Aktivera tjänsten med dessa kommandon:
+   sudo systemctl daemon-reload
+   sudo systemctl enable p1monitor.service
+   sudo systemctl start p1monitor.service
+
+## 📊 Hantering
+
+* Kontrollera status: sudo systemctl status p1monitor.service
+* Se live-loggar: journalctl -u p1monitor.service -f
+* Exportera data: Använd knappen i webbgränssnittet.
 
 ---
-Projektet körs helt lokalt och skickar ingen data till externa molntjänster.
+Projektet sparar all data lokalt i p1.db.
