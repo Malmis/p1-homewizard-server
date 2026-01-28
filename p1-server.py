@@ -410,7 +410,20 @@ def get_ip():
 
 if __name__ == "__main__":
     init_db()
+    # Starta datainsamlingen i bakgrunden
     threading.Thread(target=collector_loop, daemon=True).start()
+    
     local_ip = get_ip()
-    print(f"\n{'='*50}\n P1 MONITOR STARTAD\n Adress: http://{local_ip}:{PORT}\n{'='*50}\n")
-    app.run(host=HOST, port=PORT, threaded=True)
+    
+    # Detta tystar ner loggningen i terminalen så du slipper se 
+    # "Development server"-varningen och varje enskild HTTP-förfrågan.
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
+
+    print(f"\n{'='*50}")
+    print(f" P1 MONITOR STARTAD")
+    print(f" Adress: http://{local_ip}:{PORT}")
+    print(f"{'='*50}\n")
+
+    # Standard-run utan extra miljövariabler som kan orsaka krasch
+    app.run(host=HOST, port=PORT, threaded=True, debug=False)
