@@ -1,73 +1,44 @@
-# ⚡ P1 Monitor Pro + Pie
+# ⚡ P1 Monitor Pro
 
-En komplett lösning för att övervaka din elförbrukning via en HomeWizard P1-mätare. Systemet loggar data lokalt till en SQLite-databas och presenterar insikter via en interaktiv webbpanel.
+Lokal övervakning av HomeWizard P1-mätare med realtidsgrafer och PNG-export.
 
-## ✨ Funktioner
+## 📦 Installation
+Kör följande kommando för att installera nödvändiga moduler:
 
-* Live Dashboard: Realtidsuppdatering av effekt, ström och spänning.
-* Fasfördelning: Cirkeldiagram som visar belastningen på L1, L2 och L3.
-* Obalansanalys: Beräknar automatiskt snedbelastning mellan faserna.
-* Excel-export: CSV-export optimerad för svenska inställningar.
-
-## 📦 Python-moduler som krävs
-
-Installera dessa via terminalen:
 pip install Flask==3.0.0 flask-sock==0.7.0 requests==2.31.0
 
-## 🛠 Installation som tjänst (Linux/systemd)
+## 🚀 Snabbstart
+1. Öppna p1-server.py och sätt rätt P1_IP.
+2. Starta med: python p1-server.py
+3. Gå till: http://localhost:8000
 
-Följ dessa steg för att köra scriptet i bakgrunden:
+## 🖼 PNG-Export
+I webbläsaren finns nu en knapp under varje graf. När du klickar på den skapas en PNG-bild med vit bakgrund som sparas på din dator. Perfekt för dokumentation av din elförbrukning!
 
-1. Skapa service-filen:
-   sudo nano /etc/systemd/system/p1monitor.service
+## 🛠 Linux Service (Autostart)
+För att köra detta som en tjänst på t.ex. Raspberry Pi:
 
-2. Klistra in följande konfiguration i filen:
+1. sudo nano /etc/systemd/system/p1monitor.service
+2. Klistra in följande:
 
---------------------------------------------------
-
+```
 [Unit]
-
-Description=P1 Monitor Pro Service
-
+Description=P1 Monitor Service
 After=network.target
 
 [Service]
-
 User=pi
-
-Group=pi
-
 WorkingDirectory=/home/pi
-
 ExecStart=/usr/bin/python3 /home/pi/p1-server.py
-
 Restart=always
 
-RestartSec=5
-
-StandardOutput=inherit
-
-StandardError=inherit
-
-
 [Install]
-
 WantedBy=multi-user.target
+```
 
---------------------------------------------------
+3. Kör: sudo systemctl daemon-reload && sudo systemctl enable p1monitor.service && sudo systemctl start p1monitor.service
 
-
-
-3. Aktivera tjänsten med dessa kommandon:
-   sudo systemctl daemon-reload
-   sudo systemctl enable p1monitor.service
-   sudo systemctl start p1monitor.service
-
-## 📊 Hantering
-
-* Kontrollera status: sudo systemctl status p1monitor.service
-* Se live-loggar: journalctl -u p1monitor.service -f
-* Exportera data: Använd knappen i webbgränssnittet.
-
----
-Projektet sparar all data lokalt i p1.db.
+## 📊 Tekniker som används
+- Flask & Flask-Sock: Webserver och realtidsströmning.
+- Chart.js: Visualisering av data.
+- SQLite: Lokal lagring utan molnkrav.
