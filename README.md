@@ -1,74 +1,94 @@
-# P1 Monitor ⚡
+# P1 Monitor Pro ⚡
 
-En lättviktig och robust energi-monitor för elmätare med P1-port. Systemet loggar data till en SQLite-databas, visar grafer i realtid via WebSockets och inkluderar funktioner för både analys, mörkerläge och export.
+En avancerad realtidsmonitor för **HomeWizard P1 Wi-Fi Meter**. Systemet loggar din elförbrukning var 10:e sekund, hämtar spotpriser per timme och hjälper dig att optimera din fasbalans för att skydda dina huvudsäkringar.
 
-## ✨ Funktioner
+## ✨ Huvudfunktioner
 
-* **Realtidsvisning:** Effekt (W), Ström (A) och Spänning (V) uppdateras live i 24H-format.
-* **Fasfördelning:** Cirkeldiagram (Doughnut) som visar aktuell belastning mellan L1, L2 och L3.
-* **Historik & Zoom:** Interaktiva grafer med stöd för zoom och panorering. Växla mellan 1h, 6h och 24h historik.
-* **Mörkerläge:** Växla mellan ljust och mörkt tema via knapp. Valet sparas automatiskt i webbläsaren.
-* **Dataexport:** * Exportera historik till **CSV** (semikolon-separerad med decimalkomma för Excel).
-    * Spara den aktuella grafen som en **PNG-bild** (anpassas efter valt tema).
-* **Gränsvärden:** Visar tydliga linjer för huvudsäkring (16A) och spänningsgränser.
+* **Realtidsvisning:** Effekt (W), Ström per fas (A), Spänning (V) och aktuellt spotpris via WebSockets.
+* **Fasbalans-modul:**
+    * Grafiskt tårtdiagram över belastningen i realtid.
+    * Beräkning av **Max obalans** (differensen mellan högsta och lägsta fas) med färgvarning (Grön/Gul/Röd).
+* **Historik & Ekonomi:**
+    * Beräknar faktiska kostnader baserat på din specifika förbrukning per timme.
+    * Visar statistik för innevarande dygn och månad (kWh och SEK).
+* **Permanent Lagring:**
+    * **Mätdata:** Sparas i en lokal SQLite-databas (`p1.db`).
+    * **Prisdatabas:** Hämtade spotpriser sparas permanent så att historik laddas direkt utan nya API-anrop.
+* **Smart GUI:**
+    * Interaktiva grafer med zoom och pan (Chart.js).
+    * **Mörkt läge (Dark Mode):** Systemet sparar ditt temaval (state) i webbläsaren.
+    * Exportfunktioner för CSV-data och PNG-bilder av grafer.
 
 ## 🚀 Installation
 
-1.  **Installera beroenden:**
-    ```bash
-    pip install flask flask-sock requests
-    ```
+### 1. Förutsättningar
+Du behöver Python 3 installerat. Installera nödvändiga bibliotek med:
 
-2.  **Konfigurera IP-adress:**
-    Ändra `P1_IP` i `p1-server.py` till IP-adressen för din P1-läsare.
+```bash
+pip install flask flask-sock requests
+```
 
-3.  **Starta manuellt:**
-    ```bash
-    python p1-server.py
-    ```
+### 2. Konfiguration
+Öppna `p1-server.py` och kontrollera att variablerna i toppen av filen stämmer:
 
-## 🔄 Köra som en tjänst (Linux/Raspberry Pi)
+```python
+P1_IP = "192.168.10.191"  # IP-adressen till din HomeWizard P1
+ELOMRADE = "SE3"          # Ditt elområde (SE1, SE2, SE3 eller SE4)
+PORT = 8000               # Porten för webbgränssnittet
+```
 
-För att monitorn ska starta automatiskt vid boot och köras stabilt i bakgrunden bör du skapa en `systemd`-service.
-
-1.  **Skapa filen:**
-    ```bash
-    sudo nano /etc/systemd/system/p1-monitor.service
-    ```
-
-2.  **Klistra in koden (justera sökvägar och användarnamn):**
-    ```ini
-    [Unit]
-    Description=P1 Monitor Service
-    After=network.target
-
-    [Service]
-    # Ersätt 'pi' med ditt faktiska användarnamn
-    User=pi
-    # Ersätt med den mapp där din fil ligger
-    WorkingDirectory=/home/pi/p1-monitor
-    ExecStart=/usr/bin/python3 p1-server.py
-    Restart=always
-    RestartSec=10
-
-    [Install]
-    WantedBy=multi-user.target
-    ```
-
-3.  **Aktivera tjänsten:**
-    ```bash
-    sudo systemctl daemon-reload
-    sudo systemctl enable p1-monitor.service
-    sudo systemctl start p1-monitor.service
-    ```
-
-4.  **Hantera tjänsten:**
-    * **Status:** `sudo systemctl status p1-monitor.service`
-    * **Stoppa:** `sudo systemctl stop p1-monitor.service`
-    * **Loggar:** `journalctl -u p1-monitor.service -f`
-
-## 📊 Databas
-All data sparas i `p1.db` (SQLite). Databasen skapas automatiskt. Loggningsintervallet är som standard 10 sekunder för hög precision i realtidsvisningen.
+### 3. Starta manuellt
+```bash
+python p1-server.py
+```
+Gå till `http://localhost:8000` i din webbläsare för att se din dashboard.
 
 ---
-*Logga din elförbrukning med stil.*
+
+## 🐧 Kör som en tjänst i Linux (Ubuntu)
+
+För att scriptet ska köras dygnet runt och starta automatiskt vid omstart, bör du sätta upp det som en `systemd`-tjänst.
+
+1. **Skapa tjänstefilen:**
+   ```bash
+   sudo nano /etc/systemd/system/p1monitor.service
+   ```
+
+2. **Klistra in följande** (ersätt `dittnamn` och `/sökväg/till/mappen` med dina uppgifter):
+   ```ini
+   [Unit]
+   Description=P1 Monitor Pro Service
+   After=network.target
+
+   [Service]
+   User=dittnamn
+   WorkingDirectory=/home/dittnamn/p1-monitor
+   ExecStart=/usr/bin/python3 /home/dittnamn/p1-monitor/p1-server.py
+   Restart=always
+   RestartSec=10
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+3. **Aktivera tjänsten:**
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable p1monitor.service
+   sudo systemctl start p1monitor.service
+   ```
+
+---
+
+## 🛠 Teknikstack
+
+* **Backend:** Python 3 (Flask, Flask-Sock för WebSockets).
+* **Databas:** SQLite 3 (Lokal lagring av mätvärden och priser).
+* **Frontend:** Vanilla JS, CSS Variables, Chart.js 4.x.
+* **Spotpriser:** Hämtas automatiskt från elprisetjustnu.se.
+
+## 💡 Varför Fasbalans?
+Håll ett öga på **Max obalans**. Om värdet ofta överstiger 10A kan det innebära att en av dina huvudsäkringar är kraftigt belastad medan de andra går tomma. Detta kan leda till att strömmen går trots att din totala förbrukning inte är för hög. Justera din belastning genom att flytta tunga förbrukare mellan faserna i elcentralen.
+
+---
+*Projektet är skapat för enkel energiövervakning i smarta hem.*
