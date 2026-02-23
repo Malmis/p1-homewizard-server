@@ -25,23 +25,23 @@ En avancerad realtidsmonitor för **HomeWizard P1 Wi-Fi Meter**. Systemet loggar
 ### 1. Förutsättningar
 Du behöver Python 3 installerat. Installera nödvändiga bibliotek med:
 
-    ```bash
-    pip install flask flask-sock requests
-    ```
+```bash
+pip install flask flask-sock requests
+```
 
 ### 2. Konfiguration
 Öppna `p1-server.py` och kontrollera att variablerna i toppen av filen stämmer:
 
-    ```python
-    P1_IP = "192.168.2.141"  # IP-adressen till din HomeWizard P1
-    ELOMRADE = "SE3"          # Ditt elområde (SE1, SE2, SE3 eller SE4)
-    PORT = 8000               # Porten för webbgränssnittet
-    ```
+```python
+P1_IP = "192.168.2.141"  # IP-adressen till din HomeWizard P1
+ELOMRADE = "SE3"          # Ditt elområde (SE1, SE2, SE3 eller SE4)
+PORT = 8000               # Porten för webbgränssnittet
+```
 
 ### 3. Starta manuellt
-    ```bash
-    python p1-server.py
-    ```
+```bash
+python p1-server.py
+```
 
 Gå till `http://localhost:8000` i din webbläsare för att se din dashboard.
 
