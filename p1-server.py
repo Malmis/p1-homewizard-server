@@ -239,24 +239,21 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
   <script>
+    // --- LÖSNING FÖR TID & FORMAT ---
+    // Vi skapar en formatterare som tvingar svensk 24h-stil
+    const timeFmt = new Intl.DateTimeFormat('sv-SE', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const fullTimeFmt = new Intl.DateTimeFormat('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+    function parseToSve(s) {
+        if(!s) return null;
+        // Vi tar strängen från Python (UTC) och ser till att JS fattar att det är UTC (Z)
+        let d = new Date(s.endsWith('Z') ? s : s + 'Z');
+        return isNaN(d.getTime()) ? null : d;
+    }
+
     let chart, pie, hChart, pChart;
     let lastHistoryData = null;
     let visibleSeries = {};
-    
-    // Global format-hjälpare för tooltips (24h)
-    const formatTime24 = (date) => {
-        const d = new Date(date);
-        return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
-    };
-
-    const timeOptions = { 
-        type: 'time', 
-        time: { 
-            displayFormats: { hour: 'HH:mm', minute: 'HH:mm' }, 
-            unit: 'minute' 
-        }, 
-        ticks: { source: 'auto' } 
-    };
 
     function toggleTheme() {
       const isDark = document.body.classList.toggle('dark');
@@ -300,102 +297,124 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function initChart(hours=1) {
-      const res = await fetch('/api/series?hours=' + hours);
-      const data = await res.json();
-      if(chart) {
-        chart.data.datasets.forEach((ds, i) => visibleSeries[ds.label] = chart.isDatasetVisible(i));
-        chart.destroy();
-      }
-      chart = new Chart(document.getElementById('chart'), {
-        type: 'line',
-        data: { datasets: [
-            { label: 'Watt', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_power_w})), borderColor: '#2563eb', yAxisID: 'yW', pointRadius: 0, fill: true, backgroundColor: 'rgba(37,99,235,0.1)' },
-            { label: 'L1 (A)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_current_l1_a})), borderColor: '#dc2626', yAxisID: 'yA', pointRadius: 0 },
-            { label: 'L2 (A)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_current_l2_a})), borderColor: '#16a34a', yAxisID: 'yA', pointRadius: 0 },
-            { label: 'L3 (A)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_current_l3_a})), borderColor: '#9333ea', yAxisID: 'yA', pointRadius: 0 },
-            { label: 'L1 (V)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.voltage_l1_v})), borderColor: '#f87171', yAxisID: 'yV', pointRadius: 0, hidden: true },
-            { label: 'L2 (V)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.voltage_l2_v})), borderColor: '#4ade80', yAxisID: 'yV', pointRadius: 0, hidden: true },
-            { label: 'L3 (V)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.voltage_l3_v})), borderColor: '#c084fc', yAxisID: 'yV', pointRadius: 0, hidden: true }
-        ]},
-        options: { 
-            responsive: true, maintainAspectRatio: false, 
-            scales: { 
-                x: { ...timeOptions }, 
-                yW: { position: 'left', title: {display:true, text:'Watt'} }, 
-                yA: { position: 'right', min: 0, title: {display:true, text:'Ampere'} },
-                yV: { position: 'left', min: 200, max: 250, display: false } 
-            },
-            plugins: { 
-                zoom: { pan: { enabled: true }, zoom: { wheel: { enabled: true }, mode: 'x' } },
-                tooltip: { callbacks: { title: (items) => formatTime24(items[0].parsed.x) } }
-            }
+      try {
+        const res = await fetch('/api/series?hours=' + hours);
+        const data = await res.json();
+        if(chart) {
+            chart.data.datasets.forEach((ds, i) => visibleSeries[ds.label] = chart.isDatasetVisible(i));
+            chart.destroy();
         }
-      });
-      chart.data.datasets.forEach((ds, i) => { if(visibleSeries[ds.label] !== undefined) chart.setDatasetVisibility(i, visibleSeries[ds.label]); });
-      chart.update();
+        
+        const chartData = data.points.map(p => ({ x: parseToSve(p.measured_at), p }));
+
+        chart = new Chart(document.getElementById('chart'), {
+            type: 'line',
+            data: { datasets: [
+                { label: 'Watt', data: chartData.map(d=>({x:d.x, y:d.p.active_power_w})), borderColor: '#2563eb', yAxisID: 'yW', pointRadius: 0, fill: true, backgroundColor: 'rgba(37,99,235,0.1)' },
+                { label: 'L1 (A)', data: chartData.map(d=>({x:d.x, y:d.p.active_current_l1_a})), borderColor: '#dc2626', yAxisID: 'yA', pointRadius: 0 },
+                { label: 'L2 (A)', data: chartData.map(d=>({x:d.x, y:d.p.active_current_l2_a})), borderColor: '#16a34a', yAxisID: 'yA', pointRadius: 0 },
+                { label: 'L3 (A)', data: chartData.map(d=>({x:d.x, y:d.p.active_current_l3_a})), borderColor: '#9333ea', yAxisID: 'yA', pointRadius: 0 },
+                { label: 'L1 (V)', data: chartData.map(d=>({x:d.x, y:d.p.voltage_l1_v})), borderColor: '#f87171', yAxisID: 'yV', pointRadius: 0, hidden: true },
+                { label: 'L2 (V)', data: chartData.map(d=>({x:d.x, y:d.p.voltage_l2_v})), borderColor: '#4ade80', yAxisID: 'yV', pointRadius: 0, hidden: true },
+                { label: 'L3 (V)', data: chartData.map(d=>({x:d.x, y:d.p.voltage_l3_v})), borderColor: '#c084fc', yAxisID: 'yV', pointRadius: 0, hidden: true }
+            ]},
+            options: { 
+                responsive: true, maintainAspectRatio: false, 
+                scales: { 
+                    x: { 
+                        type: 'time', 
+                        ticks: { 
+                            callback: (val) => timeFmt.format(new Date(val)),
+                            autoSkip: true,
+                            maxTicksLimit: 12
+                        } 
+                    }, 
+                    yW: { position: 'left', title: {display:true, text:'Watt'} }, 
+                    yA: { position: 'right', min: 0, title: {display:true, text:'Ampere'} },
+                    yV: { position: 'left', min: 200, max: 260, display: false }
+                },
+                plugins: { 
+                    zoom: { pan: { enabled: true }, zoom: { wheel: { enabled: true }, mode: 'x' } },
+                    tooltip: { 
+                        callbacks: { 
+                            title: (items) => fullTimeFmt.format(new Date(items[0].parsed.x))
+                        } 
+                    }
+                }
+            }
+        });
+        chart.data.datasets.forEach((ds, i) => { if(visibleSeries[ds.label] !== undefined) chart.setDatasetVisibility(i, visibleSeries[ds.label]); });
+        chart.update();
+      } catch(e) { console.error("Kritiskt fel i initChart:", e); }
     }
 
     async function loadHistory() {
-      const d = document.getElementById('hDate').value;
-      const res = await fetch('/api/history?date=' + d);
-      const data = await res.json();
-      lastHistoryData = data;
-      document.getElementById('hCost').innerText = data.total_cost.toFixed(2) + ' kr';
-      document.getElementById('hKwh').innerText = data.total_kwh.toFixed(2) + ' kWh';
-      document.getElementById('monKwh').innerText = data.monthly_kwh.toFixed(1) + ' kWh';
-      document.getElementById('monCost').innerText = data.monthly_cost.toFixed(2) + ' kr';
-      if(hChart) hChart.destroy();
-      hChart = new Chart(document.getElementById('hChart'), {
-        type: 'line',
-        data: { datasets: [{ label: 'Effekt (Watt)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_power_w})), borderColor: '#2563eb', pointRadius: 0, fill: true, backgroundColor: 'rgba(37,99,235,0.05)' }]},
-        options: { 
-            responsive: true, maintainAspectRatio: false, 
-            scales: { x: { ...timeOptions, time: { unit: 'hour' } } },
-            plugins: { tooltip: { callbacks: { title: (items) => formatTime24(items[0].parsed.x) } } }
-        }
-      });
-      if(pChart) pChart.destroy();
-      const keys = Object.keys(data.prices).sort();
-      let roll = 0;
-      const rollData = keys.map(k => { roll += (data.quarterly_kwh[k] || 0) * data.prices[k]; return roll; });
-      pChart = new Chart(document.getElementById('pChart'), {
-        data: {
-          labels: keys,
-          datasets: [
-            { type: 'bar', label: 'Spotpris', data: keys.map(k => data.prices[k]), backgroundColor: 'rgba(245, 158, 11, 0.4)', yAxisID: 'yP' },
-            { type: 'line', label: 'Ack. Kostnad', data: rollData, borderColor: '#10b981', yAxisID: 'yC', pointRadius: 1 }
-          ]
-        },
-        options: { responsive: true, maintainAspectRatio: false, scales: { yP: { position: 'left' }, yC: { position: 'right' }, x: { ticks: { autoSkip: true, maxTicksLimit: 24 } } } }
-      });
+      try {
+        const d = document.getElementById('hDate').value;
+        const res = await fetch('/api/history?date=' + d);
+        const data = await res.json();
+        lastHistoryData = data;
+        document.getElementById('hCost').innerText = data.total_cost.toFixed(2) + ' kr';
+        document.getElementById('hKwh').innerText = data.total_kwh.toFixed(2) + ' kWh';
+        document.getElementById('monKwh').innerText = data.monthly_kwh.toFixed(1) + ' kWh';
+        document.getElementById('monCost').innerText = data.monthly_cost.toFixed(2) + ' kr';
+        
+        if(hChart) hChart.destroy();
+        hChart = new Chart(document.getElementById('hChart'), {
+            type: 'line',
+            data: { datasets: [{ label: 'Effekt (Watt)', data: data.points.map(p=>({x:parseToSve(p.measured_at), y:p.active_power_w})), borderColor: '#2563eb', pointRadius: 0, fill: true, backgroundColor: 'rgba(37,99,235,0.05)' }]},
+            options: { 
+                responsive: true, maintainAspectRatio: false, 
+                scales: { x: { type: 'time', ticks: { callback: (v) => timeFmt.format(new Date(v)) } } },
+                plugins: { tooltip: { callbacks: { title: (it) => fullTimeFmt.format(new Date(it[0].parsed.x)) } } }
+            }
+        });
+
+        if(pChart) pChart.destroy();
+        const keys = Object.keys(data.prices).sort();
+        let roll = 0;
+        const rollData = keys.map(k => { roll += (data.quarterly_kwh[k] || 0) * data.prices[k]; return roll; });
+        pChart = new Chart(document.getElementById('pChart'), {
+            data: {
+                labels: keys,
+                datasets: [
+                    { type: 'bar', label: 'Spotpris', data: keys.map(k => data.prices[k]), backgroundColor: 'rgba(245, 158, 11, 0.4)', yAxisID: 'yP' },
+                    { type: 'line', label: 'Ack. Kostnad', data: rollData, borderColor: '#10b981', yAxisID: 'yC', pointRadius: 1 }
+                ]
+            },
+            options: { responsive: true, maintainAspectRatio: false, scales: { yP: { position: 'left' }, yC: { position: 'right' } } }
+        });
+      } catch(e) { console.error("Kritiskt fel i loadHistory:", e); }
     }
 
     const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws');
     ws.onmessage = e => {
-      const m = JSON.parse(e.data);
-      document.getElementById('val-w').innerText = Math.round(m.active_power_w) + ' W';
-      document.getElementById('val-a').innerText = m.active_current_l1_a.toFixed(1) + ' / ' + m.active_current_l2_a.toFixed(1) + ' / ' + m.active_current_l3_a.toFixed(1) + ' A';
-      document.getElementById('val-v-multi').innerText = Math.round(m.voltage_l1_v) + ' / ' + Math.round(m.voltage_l2_v) + ' / ' + Math.round(m.voltage_l3_v) + ' V';
-      document.getElementById('val-price').innerText = m.price_sek_kwh.toFixed(2) + ' kr';
-      const currents = [m.active_current_l1_a, m.active_current_l2_a, m.active_current_l3_a];
-      document.getElementById('phase-l1').innerText = m.active_current_l1_a.toFixed(1) + ' A';
-      document.getElementById('phase-l2').innerText = m.active_current_l2_a.toFixed(1) + ' A';
-      document.getElementById('phase-l3').innerText = m.active_current_l3_a.toFixed(1) + ' A';
-      document.getElementById('total-a').innerText = 'Totalt: ' + m.total_current_a.toFixed(1) + ' A';
-      const imbalance = Math.max(...currents) - Math.min(...currents);
-      const imbEl = document.getElementById('phase-imbalance');
-      imbEl.innerText = imbalance.toFixed(1) + ' A';
-      imbEl.style.color = imbalance > 10 ? '#ef4444' : (imbalance > 5 ? '#f59e0b' : '#10b981');
-      if(pie) { pie.data.datasets[0].data = currents; pie.update('none'); }
+      try {
+          const m = JSON.parse(e.data);
+          document.getElementById('val-w').innerText = Math.round(m.active_power_w) + ' W';
+          document.getElementById('val-a').innerText = m.active_current_l1_a.toFixed(1) + ' / ' + m.active_current_l2_a.toFixed(1) + ' / ' + m.active_current_l3_a.toFixed(1) + ' A';
+          document.getElementById('val-v-multi').innerText = Math.round(m.voltage_l1_v) + ' / ' + Math.round(m.voltage_l2_v) + ' / ' + Math.round(m.voltage_l3_v) + ' V';
+          document.getElementById('val-price').innerText = m.price_sek_kwh.toFixed(2) + ' kr';
+          const currents = [m.active_current_l1_a, m.active_current_l2_a, m.active_current_l3_a];
+          document.getElementById('phase-l1').innerText = m.active_current_l1_a.toFixed(1) + ' A';
+          document.getElementById('phase-l2').innerText = m.active_current_l2_a.toFixed(1) + ' A';
+          document.getElementById('phase-l3').innerText = m.active_current_l3_a.toFixed(1) + ' A';
+          document.getElementById('total-a').innerText = 'Totalt: ' + m.total_current_a.toFixed(1) + ' A';
+          const imb = (Math.max(...currents) - Math.min(...currents)).toFixed(1);
+          document.getElementById('phase-imbalance').innerText = imb + ' A';
+          if(pie) { pie.data.datasets[0].data = currents; pie.update('none'); }
+      } catch(e) {}
     };
 
     window.onload = () => {
       applySavedTheme();
+      init_db();
       document.getElementById('hDate').value = new Date().toISOString().split('T')[0];
       initChart(); loadHistory();
       pie = new Chart(document.getElementById('pie'), { type: 'doughnut', data: { labels: ['L1','L2','L3'], datasets: [{data:[0,0,0], backgroundColor:['#dc2626','#16a34a','#9333ea']}]}, options: {responsive:true, maintainAspectRatio:false}});
     };
     function changeRange(h, b) { document.querySelectorAll('.controls button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); initChart(h); }
+    function init_db() { /* Placeholder */ }
   </script>
 </body>
 </html>
