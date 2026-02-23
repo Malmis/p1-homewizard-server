@@ -16,7 +16,6 @@ ELOMRADE = "SE3"
 PORT = 8000
 current_prices = {}
 
-# --- Hjälpfunktion för att mappa tid till kvartspris ---
 def get_price_key(dt_obj):
     minute = (dt_obj.minute // 15) * 15
     return f"{dt_obj.hour:02d}:{minute:02d}"
@@ -68,8 +67,7 @@ def get_prices_for_date(date_obj):
 def elpris_scheduler():
     global current_prices
     while True:
-        try:
-            current_prices = get_prices_for_date(datetime.now())
+        try: current_prices = get_prices_for_date(datetime.now())
         except: pass
         time.sleep(3600)
 
@@ -244,7 +242,21 @@ INDEX_HTML = r"""<!doctype html>
     let chart, pie, hChart, pChart;
     let lastHistoryData = null;
     let visibleSeries = {};
-    const timeOptions = { type: 'time', time: { displayFormats: { hour: 'HH:mm', minute: 'HH:mm' }, unit: 'minute' }, ticks: { source: 'auto' } };
+    
+    // Global format-hjälpare för tooltips (24h)
+    const formatTime24 = (date) => {
+        const d = new Date(date);
+        return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+    };
+
+    const timeOptions = { 
+        type: 'time', 
+        time: { 
+            displayFormats: { hour: 'HH:mm', minute: 'HH:mm' }, 
+            unit: 'minute' 
+        }, 
+        ticks: { source: 'auto' } 
+    };
 
     function toggleTheme() {
       const isDark = document.body.classList.toggle('dark');
@@ -264,28 +276,26 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function exportHistoryWattCSV() {
-      if (!lastHistoryData || !lastHistoryData.points.length) return alert('Ingen data för valt datum');
+      if (!lastHistoryData || !lastHistoryData.points.length) return alert('Ingen data');
       let csv = '\ufeffTid;Effekt_Watt\n';
-      lastHistoryData.points.forEach(p => {
-        csv += `${p.measured_at};${p.active_power_w}\n`;
-      });
+      lastHistoryData.points.forEach(p => { csv += p.measured_at + ';' + p.active_power_w + '\n'; });
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `p1_effekt_historik_${document.getElementById('hDate').value}.csv`;
+      a.href = url; a.download = 'p1_effekt_' + document.getElementById('hDate').value + '.csv';
       a.click();
     }
 
     function exportCSV() {
       if (!lastHistoryData || !lastHistoryData.points.length) return alert('Ingen data');
       let csv = '\ufeffTid;Effekt_W;Total_kWh;L1_V;L2_V;L3_V;L1_A;L2_A;L3_A\n';
-      lastHistoryData.points.forEach(p => {
-        csv += `${p.measured_at};${p.active_power_w};${p.total_import_kwh};${p.voltage_l1_v};${p.voltage_l2_v};${p.voltage_l3_v};${p.active_current_l1_a};${p.active_current_l2_a};${p.active_current_l3_a}\n`;
+      lastHistoryData.points.forEach(p => { 
+          csv += p.measured_at + ';' + p.active_power_w + ';' + p.total_import_kwh + ';' + p.voltage_l1_v + ';' + p.voltage_l2_v + ';' + p.voltage_l3_v + ';' + p.active_current_l1_a + ';' + p.active_current_l2_a + ';' + p.active_current_l3_a + '\n'; 
       });
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `p1_full_export_${document.getElementById('hDate').value}.csv`;
+      a.href = url; a.download = 'p1_full_' + document.getElementById('hDate').value + '.csv';
       a.click();
     }
 
@@ -302,12 +312,23 @@ INDEX_HTML = r"""<!doctype html>
             { label: 'Watt', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_power_w})), borderColor: '#2563eb', yAxisID: 'yW', pointRadius: 0, fill: true, backgroundColor: 'rgba(37,99,235,0.1)' },
             { label: 'L1 (A)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_current_l1_a})), borderColor: '#dc2626', yAxisID: 'yA', pointRadius: 0 },
             { label: 'L2 (A)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_current_l2_a})), borderColor: '#16a34a', yAxisID: 'yA', pointRadius: 0 },
-            { label: 'L3 (A)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_current_l3_a})), borderColor: '#9333ea', yAxisID: 'yA', pointRadius: 0 }
+            { label: 'L3 (A)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_current_l3_a})), borderColor: '#9333ea', yAxisID: 'yA', pointRadius: 0 },
+            { label: 'L1 (V)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.voltage_l1_v})), borderColor: '#f87171', yAxisID: 'yV', pointRadius: 0, hidden: true },
+            { label: 'L2 (V)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.voltage_l2_v})), borderColor: '#4ade80', yAxisID: 'yV', pointRadius: 0, hidden: true },
+            { label: 'L3 (V)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.voltage_l3_v})), borderColor: '#c084fc', yAxisID: 'yV', pointRadius: 0, hidden: true }
         ]},
         options: { 
             responsive: true, maintainAspectRatio: false, 
-            scales: { x: { ...timeOptions }, yW: { position: 'left' }, yA: { position: 'right', min: 0 } },
-            plugins: { zoom: { pan: { enabled: true }, zoom: { wheel: { enabled: true }, mode: 'x' } } }
+            scales: { 
+                x: { ...timeOptions }, 
+                yW: { position: 'left', title: {display:true, text:'Watt'} }, 
+                yA: { position: 'right', min: 0, title: {display:true, text:'Ampere'} },
+                yV: { position: 'left', min: 200, max: 250, display: false } 
+            },
+            plugins: { 
+                zoom: { pan: { enabled: true }, zoom: { wheel: { enabled: true }, mode: 'x' } },
+                tooltip: { callbacks: { title: (items) => formatTime24(items[0].parsed.x) } }
+            }
         }
       });
       chart.data.datasets.forEach((ds, i) => { if(visibleSeries[ds.label] !== undefined) chart.setDatasetVisibility(i, visibleSeries[ds.label]); });
@@ -323,14 +344,16 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('hKwh').innerText = data.total_kwh.toFixed(2) + ' kWh';
       document.getElementById('monKwh').innerText = data.monthly_kwh.toFixed(1) + ' kWh';
       document.getElementById('monCost').innerText = data.monthly_cost.toFixed(2) + ' kr';
-      
       if(hChart) hChart.destroy();
       hChart = new Chart(document.getElementById('hChart'), {
         type: 'line',
         data: { datasets: [{ label: 'Effekt (Watt)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_power_w})), borderColor: '#2563eb', pointRadius: 0, fill: true, backgroundColor: 'rgba(37,99,235,0.05)' }]},
-        options: { responsive: true, maintainAspectRatio: false, scales: { x: { ...timeOptions, time: { unit: 'hour' } } } }
+        options: { 
+            responsive: true, maintainAspectRatio: false, 
+            scales: { x: { ...timeOptions, time: { unit: 'hour' } } },
+            plugins: { tooltip: { callbacks: { title: (items) => formatTime24(items[0].parsed.x) } } }
+        }
       });
-      
       if(pChart) pChart.destroy();
       const keys = Object.keys(data.prices).sort();
       let roll = 0;
@@ -339,8 +362,8 @@ INDEX_HTML = r"""<!doctype html>
         data: {
           labels: keys,
           datasets: [
-            { type: 'bar', label: 'Spotpris (kvart)', data: keys.map(k => data.prices[k]), backgroundColor: 'rgba(245, 158, 11, 0.4)', yAxisID: 'yP' },
-            { type: 'line', label: 'Ack. Kostnad', data: rollData, borderColor: '#10b981', yAxisID: 'yC', pointRadius: 1, borderWidth: 2 }
+            { type: 'bar', label: 'Spotpris', data: keys.map(k => data.prices[k]), backgroundColor: 'rgba(245, 158, 11, 0.4)', yAxisID: 'yP' },
+            { type: 'line', label: 'Ack. Kostnad', data: rollData, borderColor: '#10b981', yAxisID: 'yC', pointRadius: 1 }
           ]
         },
         options: { responsive: true, maintainAspectRatio: false, scales: { yP: { position: 'left' }, yC: { position: 'right' }, x: { ticks: { autoSkip: true, maxTicksLimit: 24 } } } }
@@ -359,7 +382,10 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('phase-l2').innerText = m.active_current_l2_a.toFixed(1) + ' A';
       document.getElementById('phase-l3').innerText = m.active_current_l3_a.toFixed(1) + ' A';
       document.getElementById('total-a').innerText = 'Totalt: ' + m.total_current_a.toFixed(1) + ' A';
-      document.getElementById('phase-imbalance').innerText = (Math.max(...currents) - Math.min(...currents)).toFixed(1) + ' A';
+      const imbalance = Math.max(...currents) - Math.min(...currents);
+      const imbEl = document.getElementById('phase-imbalance');
+      imbEl.innerText = imbalance.toFixed(1) + ' A';
+      imbEl.style.color = imbalance > 10 ? '#ef4444' : (imbalance > 5 ? '#f59e0b' : '#10b981');
       if(pie) { pie.data.datasets[0].data = currents; pie.update('none'); }
     };
 
