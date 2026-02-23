@@ -10,11 +10,16 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 # --- Konfiguration ---
-P1_IP = "192.168.10.191"
+P1_IP = "192.168.2.141"
 DB_PATH = "p1.db"
 ELOMRADE = "SE3"
 PORT = 8000
 current_prices = {}
+
+# --- Hjälpfunktion för att mappa tid till kvartspris ---
+def get_price_key(dt_obj):
+    minute = (dt_obj.minute // 15) * 15
+    return f"{dt_obj.hour:02d}:{minute:02d}"
 
 # --- Databas ---
 def init_db():
@@ -36,12 +41,24 @@ def get_prices_for_date(date_obj):
     ds = date_obj.strftime('%Y-%m-%d')
     with sqlite3.connect(DB_PATH) as conn:
         res = conn.execute("SELECT json_data FROM daily_prices WHERE date_str = ?", (ds,)).fetchone()
-        if res: return json.loads(res[0])
+        if res:
+            p_data = json.loads(res[0])
+            if len(p_data) >= 96: return p_data
     try:
         url = f"https://www.elprisetjustnu.se/api/v1/prices/{date_obj.year}/{date_obj.strftime('%m-%d')}_{ELOMRADE}.json"
         r = requests.get(url, timeout=10)
         if r.status_code == 200:
-            prices = {datetime.fromisoformat(p['time_start']).strftime('%H'): float(p.get('SEK_per_kWh') or p.get('sek_per_kwh')) for p in r.json()}
+            raw_data = r.json()
+            prices = {}
+            for p in raw_data:
+                key = datetime.fromisoformat(p['time_start']).strftime('%H:%M')
+                prices[key] = float(p.get('SEK_per_kWh') or p.get('sek_per_kwh'))
+            if len(raw_data) <= 24:
+                new_p = {}
+                for h_key, val in prices.items():
+                    h = h_key.split(':')[0]
+                    for m in ["00", "15", "30", "45"]: new_p[f"{h}:{m}"] = val
+                prices = new_p
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute("INSERT OR REPLACE INTO daily_prices (date_str, json_data) VALUES (?, ?)", (ds, json.dumps(prices)))
             return prices
@@ -51,7 +68,9 @@ def get_prices_for_date(date_obj):
 def elpris_scheduler():
     global current_prices
     while True:
-        current_prices = get_prices_for_date(datetime.now())
+        try:
+            current_prices = get_prices_for_date(datetime.now())
+        except: pass
         time.sleep(3600)
 
 def calculate_period_stats(start_dt, end_dt):
@@ -68,8 +87,8 @@ def calculate_period_stats(start_dt, end_dt):
                 if v1 is not None and v2 is not None:
                     diff = v1 - v2
                     if 0 < diff < 50:
-                        h = datetime.fromisoformat(rows[i]['measured_at'].replace("Z", "+00:00")).astimezone().strftime('%H')
-                        total_cost += diff * prices.get(h, 0)
+                        dt = datetime.fromisoformat(rows[i]['measured_at'].replace("Z", "+00:00")).astimezone()
+                        total_cost += diff * prices.get(get_price_key(dt), 0)
                         total_kwh += diff
             curr += timedelta(days=1)
     return round(total_cost, 2), round(total_kwh, 2)
@@ -82,15 +101,14 @@ def collector_loop():
     while True:
         try:
             r = requests.get(f"http://{P1_IP}/api/v1/data", timeout=5).json()
-            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            now_dt = datetime.now(timezone.utc)
+            now_str = now_dt.isoformat().replace("+00:00", "Z")
             v1, v2, v3 = r.get("active_voltage_l1_v", 0), r.get("active_voltage_l2_v", 0), r.get("active_voltage_l3_v", 0)
-            vals = [now, r.get("active_power_w", 0), r.get("total_power_import_kwh") or r.get("total_import_kwh"), 
-                    v1, v2, v3, r.get("active_current_l1_a", 0), r.get("active_current_l2_a", 0), r.get("active_current_l3_a", 0)]
+            c1, c2, c3 = r.get("active_current_l1_a", 0), r.get("active_current_l2_a", 0), r.get("active_current_l3_a", 0)
+            vals = [now_str, r.get("active_power_w", 0), r.get("total_power_import_kwh") or r.get("total_import_kwh"), v1, v2, v3, c1, c2, c3]
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute("INSERT INTO p1_measurements (measured_at, active_power_w, total_import_kwh, voltage_l1_v, voltage_l2_v, voltage_l3_v, active_current_l1_a, active_current_l2_a, active_current_l3_a) VALUES (?,?,?,?,?,?,?,?,?)", vals)
-            p = {"measured_at": now, "active_power_w": vals[1], "voltage_l1_v": v1, "voltage_l2_v": v2, "voltage_l3_v": v3, 
-                 "active_current_l1_a": vals[6], "active_current_l2_a": vals[7], "active_current_l3_a": vals[8],
-                 "total_current_a": sum(vals[6:9]), "price_sek_kwh": current_prices.get(datetime.now().strftime('%H'), 0)}
+            p = {"measured_at": now_str, "active_power_w": vals[1], "voltage_l1_v": v1, "voltage_l2_v": v2, "voltage_l3_v": v3, "active_current_l1_a": c1, "active_current_l2_a": c2, "active_current_l3_a": c3, "total_current_a": sum([c1, c2, c3]), "price_sek_kwh": current_prices.get(get_price_key(datetime.now()), 0)}
             for q in list(subscribers): q.put_nowait(p)
         except: pass
         time.sleep(10)
@@ -103,7 +121,8 @@ def api_history():
     d_str = request.args.get("date")
     ld = datetime.strptime(d_str, '%Y-%m-%d')
     prices = get_prices_for_date(ld)
-    day_cost, day_kwh, hourly_kwh = 0.0, 0.0, {f"{h:02}": 0.0 for h in range(24)}
+    day_cost, day_kwh = 0.0, 0.0
+    quarterly_kwh = {k: 0.0 for k in prices.keys()}
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         pts = conn.execute("SELECT * FROM p1_measurements WHERE measured_at BETWEEN ? AND ? ORDER BY measured_at ASC", (ld.strftime('%Y-%m-%dT00:00:00Z'), ld.strftime('%Y-%m-%dT23:59:59Z'))).fetchall()
@@ -112,12 +131,13 @@ def api_history():
             if v1 is not None and v2 is not None:
                 diff = v1 - v2
                 if 0 < diff < 50:
-                    h = datetime.fromisoformat(pts[i]['measured_at'].replace("Z", "+00:00")).astimezone().strftime('%H')
-                    day_cost += diff * prices.get(h, 0)
+                    dt = datetime.fromisoformat(pts[i]['measured_at'].replace("Z", "+00:00")).astimezone()
+                    pk = get_price_key(dt)
+                    day_cost += diff * prices.get(pk, 0)
                     day_kwh += diff
-                    hourly_kwh[h] += diff
+                    if pk in quarterly_kwh: quarterly_kwh[pk] += diff
     mon_cost, mon_kwh = calculate_period_stats(ld.replace(day=1), ld)
-    return jsonify({"total_kwh": round(day_kwh, 2), "total_cost": round(day_cost, 2), "monthly_kwh": mon_kwh, "monthly_cost": mon_cost, "prices": prices, "hourly_kwh": hourly_kwh, "points": [dict(p) for p in pts]})
+    return jsonify({"total_kwh": round(day_kwh, 2), "total_cost": round(day_cost, 2), "monthly_kwh": mon_kwh, "monthly_cost": mon_cost, "prices": prices, "quarterly_kwh": quarterly_kwh, "points": [dict(p) for p in pts]})
 
 @app.route("/api/series")
 def api_series():
@@ -158,7 +178,6 @@ INDEX_HTML = r"""<!doctype html>
     button, .btn { padding: 8px 12px; cursor: pointer; border: 1px solid var(--border); background: var(--card); color: var(--text); border-radius: 5px; }
     button.active { background: #007bff; color: #fff; }
     .footer-kred { margin-top: 20px; text-align: center; opacity: 0.8; font-size: 0.9em; }
-    .footer-kred a { color: inherit; text-decoration: none; }
   </style>
 </head>
 <body>
@@ -175,35 +194,35 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <div class="main-grid">
       <div class="card"><div class="chart-container"><canvas id="chart"></canvas></div></div>
-      <div class="card" style="text-align:center; display: flex; flex-direction: column; justify-content: space-between;">
+      <div class="card" style="text-align:center;">
         <h4>Fasbalans</h4>
         <div style="height:200px;"><canvas id="pie"></canvas></div>
-        <div style="margin-top: 15px; padding: 10px; background: var(--stat); border-radius: 5px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px;">
-            <div><small style="color:#dc2626">● L1</small><br><span id="phase-l1" style="font-weight:bold">-</span></div>
-            <div><small style="color:#16a34a">● L2</small><br><span id="phase-l2" style="font-weight:bold">-</span></div>
-            <div><small style="color:#9333ea">● L3</small><br><span id="phase-l3" style="font-weight:bold">-</span></div>
+        <div style="margin-top:15px; display:grid; grid-template-columns: 1fr 1fr 1fr; gap:5px;">
+          <div><small style="color:#dc2626">L1</small><br><span id="phase-l1" style="font-weight:bold">-</span></div>
+          <div><small style="color:#16a34a">L2</small><br><span id="phase-l2" style="font-weight:bold">-</span></div>
+          <div><small style="color:#9333ea">L3</small><br><span id="phase-l3" style="font-weight:bold">-</span></div>
         </div>
-        <div style="margin-top: 10px; font-size: 0.9em;">
-            <p id="total-a" style="font-weight:bold; margin: 5px 0;">Totalt: - A</p>
-            <p style="margin: 0; border-top: 1px solid var(--border); padding-top: 5px;">
-                Max obalans: <span id="phase-imbalance" style="font-weight:bold; color: #f59e0b;">- A</span>
-            </p>
-        </div>
+        <p id="total-a" style="font-weight:bold; margin-top:10px;">Totalt: - A</p>
+        <p>Max obalans: <span id="phase-imbalance" style="font-weight:bold;">- A</span></p>
       </div>
     </div>
     <div class="stats">
       <div class="stat-card">Effekt<span id="val-w" class="stat-val">- W</span></div>
-      <div class="stat-card">Ström (L1 / L2 / L3)<span id="val-a" class="stat-val">- A</span></div>
-      <div class="stat-card">Spänning (L1 / L2 / L3)<span id="val-v-multi" class="stat-val">- V</span></div>
-      <div class="stat-card">Pris nu<span id="val-price" class="stat-val">- kr</span></div>
+      <div class="stat-card">Ström (L1/L2/L3)<span id="val-a" class="stat-val">- A</span></div>
+      <div class="stat-card">Spänning (L1/L2/L3)<span id="val-v-multi" class="stat-val">- V</span></div>
+      <div class="stat-card">Pris nu (kvart)<span id="val-price" class="stat-val">- kr</span></div>
     </div>
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <h3>Historik & Ekonomi</h3>
         <div class="controls">
             <input type="date" id="hDate" onchange="loadHistory()">
-            <button onclick="exportCSV()" class="btn">Exportera CSV</button>
-            <button onclick="savePNG('pChart')" class="btn">Spara PNG</button>
+            <div style="border-left: 2px solid var(--border); padding-left: 10px; display: flex; gap: 5px;">
+                <button onclick="exportHistoryWattCSV()" class="btn">Effekt-CSV</button>
+                <button onclick="savePNG('hChart')" class="btn">Effekt-PNG</button>
+                <button onclick="exportCSV()" class="btn">All Data-CSV</button>
+                <button onclick="savePNG('pChart')" class="btn">Pris-PNG</button>
+            </div>
         </div>
       </div>
       <div class="stats">
@@ -218,7 +237,6 @@ INDEX_HTML = r"""<!doctype html>
       </div>
       <div class="footer-kred">
         <p><a href="https://www.elprisetjustnu.se" target="_blank"><img src="https://i.bnfcl.io/hva-koster-strommen/elpriser-tillhandahalls-av-elprisetjustnu_ttNExOIU_.png" alt="Elpriser" width="200" height="45"></a></p>
-        <p>Hårdvara: <a href="https://www.homewizard.com/" target="_blank">HomeWizard P1 Wi-Fi Meter</a></p>
       </div>
     </div>
   </div>
@@ -238,10 +256,24 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function savePNG(id) {
+      const canvas = document.getElementById(id);
       const l = document.createElement('a');
       l.download = id+'_'+new Date().toISOString().slice(0,19)+'.png';
-      l.href = document.getElementById(id).toDataURL();
+      l.href = canvas.toDataURL('image/png');
       l.click();
+    }
+
+    function exportHistoryWattCSV() {
+      if (!lastHistoryData || !lastHistoryData.points.length) return alert('Ingen data för valt datum');
+      let csv = '\ufeffTid;Effekt_Watt\n';
+      lastHistoryData.points.forEach(p => {
+        csv += `${p.measured_at};${p.active_power_w}\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `p1_effekt_historik_${document.getElementById('hDate').value}.csv`;
+      a.click();
     }
 
     function exportCSV() {
@@ -253,8 +285,8 @@ INDEX_HTML = r"""<!doctype html>
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `p1_export_${document.getElementById('hDate').value}.csv`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      a.href = url; a.download = `p1_full_export_${document.getElementById('hDate').value}.csv`;
+      a.click();
     }
 
     async function initChart(hours=1) {
@@ -270,27 +302,17 @@ INDEX_HTML = r"""<!doctype html>
             { label: 'Watt', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_power_w})), borderColor: '#2563eb', yAxisID: 'yW', pointRadius: 0, fill: true, backgroundColor: 'rgba(37,99,235,0.1)' },
             { label: 'L1 (A)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_current_l1_a})), borderColor: '#dc2626', yAxisID: 'yA', pointRadius: 0 },
             { label: 'L2 (A)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_current_l2_a})), borderColor: '#16a34a', yAxisID: 'yA', pointRadius: 0 },
-            { label: 'L3 (A)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_current_l3_a})), borderColor: '#9333ea', yAxisID: 'yA', pointRadius: 0 },
-            { label: 'L1 (V)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.voltage_l1_v})), borderColor: '#f87171', yAxisID: 'yV', pointRadius: 0, borderDash: [2,2], hidden: true },
-            { label: 'L2 (V)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.voltage_l2_v})), borderColor: '#4ade80', yAxisID: 'yV', pointRadius: 0, borderDash: [2,2], hidden: true },
-            { label: 'L3 (V)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.voltage_l3_v})), borderColor: '#c084fc', yAxisID: 'yV', pointRadius: 0, borderDash: [2,2], hidden: true }
+            { label: 'L3 (A)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_current_l3_a})), borderColor: '#9333ea', yAxisID: 'yA', pointRadius: 0 }
         ]},
         options: { 
             responsive: true, maintainAspectRatio: false, 
-            scales: { 
-                x: { ...timeOptions, time: { ...timeOptions.time, unit: hours > 6 ? 'hour' : 'minute' } }, 
-                yW: { position: 'left' }, 
-                yA: { position: 'right', min: 0 },
-                yV: { position: 'right', display: false, min: 200, max: 260 } 
-            },
+            scales: { x: { ...timeOptions }, yW: { position: 'left' }, yA: { position: 'right', min: 0 } },
             plugins: { zoom: { pan: { enabled: true }, zoom: { wheel: { enabled: true }, mode: 'x' } } }
         }
       });
       chart.data.datasets.forEach((ds, i) => { if(visibleSeries[ds.label] !== undefined) chart.setDatasetVisibility(i, visibleSeries[ds.label]); });
       chart.update();
     }
-
-    function changeRange(h, b) { document.querySelectorAll('.controls button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); initChart(h); }
 
     async function loadHistory() {
       const d = document.getElementById('hDate').value;
@@ -301,25 +323,27 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('hKwh').innerText = data.total_kwh.toFixed(2) + ' kWh';
       document.getElementById('monKwh').innerText = data.monthly_kwh.toFixed(1) + ' kWh';
       document.getElementById('monCost').innerText = data.monthly_cost.toFixed(2) + ' kr';
+      
       if(hChart) hChart.destroy();
       hChart = new Chart(document.getElementById('hChart'), {
         type: 'line',
-        data: { datasets: [{ label: 'Watt Historik', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_power_w})), borderColor: '#2563eb', pointRadius: 0 }]},
-        options: { responsive: true, maintainAspectRatio: false, scales: { x: { ...timeOptions, time: { ...timeOptions.time, unit: 'hour' } } } }
+        data: { datasets: [{ label: 'Effekt (Watt)', data: data.points.map(p=>({x:new Date(p.measured_at), y:p.active_power_w})), borderColor: '#2563eb', pointRadius: 0, fill: true, backgroundColor: 'rgba(37,99,235,0.05)' }]},
+        options: { responsive: true, maintainAspectRatio: false, scales: { x: { ...timeOptions, time: { unit: 'hour' } } } }
       });
+      
       if(pChart) pChart.destroy();
-      const hours = Object.keys(data.prices).sort();
+      const keys = Object.keys(data.prices).sort();
       let roll = 0;
-      const rollData = hours.map(h => { roll += (data.hourly_kwh[h] || 0) * data.prices[h]; return roll; });
+      const rollData = keys.map(k => { roll += (data.quarterly_kwh[k] || 0) * data.prices[k]; return roll; });
       pChart = new Chart(document.getElementById('pChart'), {
         data: {
-          labels: hours.map(h => h+':00'),
+          labels: keys,
           datasets: [
-            { type: 'bar', label: 'Spotpris', data: hours.map(h => data.prices[h]), backgroundColor: 'rgba(245, 158, 11, 0.4)', yAxisID: 'yP' },
-            { type: 'line', label: 'Ack. Kostnad', data: rollData, borderColor: '#10b981', yAxisID: 'yC', pointRadius: 2, borderWidth: 3 }
+            { type: 'bar', label: 'Spotpris (kvart)', data: keys.map(k => data.prices[k]), backgroundColor: 'rgba(245, 158, 11, 0.4)', yAxisID: 'yP' },
+            { type: 'line', label: 'Ack. Kostnad', data: rollData, borderColor: '#10b981', yAxisID: 'yC', pointRadius: 1, borderWidth: 2 }
           ]
         },
-        options: { responsive: true, maintainAspectRatio: false, scales: { yP: { position: 'left' }, yC: { position: 'right', grid: { drawOnChartArea: false } } } }
+        options: { responsive: true, maintainAspectRatio: false, scales: { yP: { position: 'left' }, yC: { position: 'right' }, x: { ticks: { autoSkip: true, maxTicksLimit: 24 } } } }
       });
     }
 
@@ -330,20 +354,12 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('val-a').innerText = m.active_current_l1_a.toFixed(1) + ' / ' + m.active_current_l2_a.toFixed(1) + ' / ' + m.active_current_l3_a.toFixed(1) + ' A';
       document.getElementById('val-v-multi').innerText = Math.round(m.voltage_l1_v) + ' / ' + Math.round(m.voltage_l2_v) + ' / ' + Math.round(m.voltage_l3_v) + ' V';
       document.getElementById('val-price').innerText = m.price_sek_kwh.toFixed(2) + ' kr';
-      
-      // Beräkna obalans
       const currents = [m.active_current_l1_a, m.active_current_l2_a, m.active_current_l3_a];
-      const imbalance = Math.max(...currents) - Math.min(...currents);
-      
       document.getElementById('phase-l1').innerText = m.active_current_l1_a.toFixed(1) + ' A';
       document.getElementById('phase-l2').innerText = m.active_current_l2_a.toFixed(1) + ' A';
       document.getElementById('phase-l3').innerText = m.active_current_l3_a.toFixed(1) + ' A';
       document.getElementById('total-a').innerText = 'Totalt: ' + m.total_current_a.toFixed(1) + ' A';
-      
-      const imbEl = document.getElementById('phase-imbalance');
-      imbEl.innerText = imbalance.toFixed(1) + ' A';
-      imbEl.style.color = imbalance > 10 ? '#ef4444' : (imbalance > 5 ? '#f59e0b' : '#10b981');
-
+      document.getElementById('phase-imbalance').innerText = (Math.max(...currents) - Math.min(...currents)).toFixed(1) + ' A';
       if(pie) { pie.data.datasets[0].data = currents; pie.update('none'); }
     };
 
@@ -353,6 +369,7 @@ INDEX_HTML = r"""<!doctype html>
       initChart(); loadHistory();
       pie = new Chart(document.getElementById('pie'), { type: 'doughnut', data: { labels: ['L1','L2','L3'], datasets: [{data:[0,0,0], backgroundColor:['#dc2626','#16a34a','#9333ea']}]}, options: {responsive:true, maintainAspectRatio:false}});
     };
+    function changeRange(h, b) { document.querySelectorAll('.controls button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); initChart(h); }
   </script>
 </body>
 </html>
