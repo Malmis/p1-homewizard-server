@@ -8,7 +8,7 @@ En avancerad realtidsmonitor för **HomeWizard P1 Wi-Fi Meter**. Systemet loggar
 * **Kvartsbaserade Elpriser:** Systemet hanterar den moderna prismodellen med unika priser per kvart för exakt kostnadsberäkning.
 * **Fasbalans-modul:**
     * Grafiskt tårtdiagram över belastningen i realtid.
-    * Beräkning av **Max obalans** (differensen mellan högsta och lägsta fas) med färgvarning.
+    * Beräkning av **Max obalans** (differensen mellan högsta och lägsta fas) med färgvarning (Grön/Gul/Röd).
 * **Historik & Ekonomi:**
     * Beräknar faktiska kostnader baserat på din specifika förbrukning per timme/kvart.
     * Visar statistik för innevarande dygn och månad (kWh och SEK).
