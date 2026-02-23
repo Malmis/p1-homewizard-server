@@ -52,33 +52,33 @@ Gå till `http://localhost:8000` i din webbläsare för att se din dashboard.
 För att scriptet ska köras dygnet runt och starta automatiskt vid omstart, bör du sätta upp det som en `systemd`-tjänst.
 
 1. **Skapa tjänstefilen:**
-   ` ` `bash
-   sudo nano /etc/systemd/system/p1monitor.service
-   ` ` `
+```bash
+sudo nano /etc/systemd/system/p1monitor.service
+```
 
 2. **Klistra in följande** (ersätt `dittnamn` och `/sökväg/till/mappen` med dina uppgifter):
-   ` ` `ini
-   [Unit]
-   Description=P1 Monitor Pro Service
-   After=network.target
+```ini
+[Unit]
+Description=P1 Monitor Pro Service
+After=network.target
 
-   [Service]
-   User=dittnamn
-   WorkingDirectory=/home/dittnamn/p1-monitor
-   ExecStart=/usr/bin/python3 /home/dittnamn/p1-monitor/p1-server.py
-   Restart=always
-   RestartSec=10
+[Service]
+User=dittnamn
+WorkingDirectory=/home/dittnamn/p1-monitor
+ExecStart=/usr/bin/python3 /home/dittnamn/p1-monitor/p1-server.py
+Restart=always
+RestartSec=10
 
-   [Install]
-   WantedBy=multi-user.target
-   ` ` `
+[Install]
+WantedBy=multi-user.target
+ ```
 
 3. **Aktivera tjänsten:**
-   ` ` `bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable p1monitor.service
-   sudo systemctl start p1monitor.service
-   ` ` `
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable p1monitor.service
+sudo systemctl start p1monitor.service
+```
 ---
 
 ## 🛠 Teknikstack
