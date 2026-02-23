@@ -239,14 +239,12 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </div>
   <script>
-    // --- LÖSNING FÖR TID & FORMAT ---
-    // Vi skapar en formatterare som tvingar svensk 24h-stil
     const timeFmt = new Intl.DateTimeFormat('sv-SE', { hour: '2-digit', minute: '2-digit', hour12: false });
     const fullTimeFmt = new Intl.DateTimeFormat('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    let currentRangeHours = 1;
 
     function parseToSve(s) {
         if(!s) return null;
-        // Vi tar strängen från Python (UTC) och ser till att JS fattar att det är UTC (Z)
         let d = new Date(s.endsWith('Z') ? s : s + 'Z');
         return isNaN(d.getTime()) ? null : d;
     }
@@ -297,6 +295,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function initChart(hours=1) {
+      currentRangeHours = hours;
       try {
         const res = await fetch('/api/series?hours=' + hours);
         const data = await res.json();
@@ -320,14 +319,11 @@ INDEX_HTML = r"""<!doctype html>
             ]},
             options: { 
                 responsive: true, maintainAspectRatio: false, 
+                animation: false,
                 scales: { 
                     x: { 
                         type: 'time', 
-                        ticks: { 
-                            callback: (val) => timeFmt.format(new Date(val)),
-                            autoSkip: true,
-                            maxTicksLimit: 12
-                        } 
+                        ticks: { callback: (val) => timeFmt.format(new Date(val)), autoSkip: true, maxTicksLimit: 12 } 
                     }, 
                     yW: { position: 'left', title: {display:true, text:'Watt'} }, 
                     yA: { position: 'right', min: 0, title: {display:true, text:'Ampere'} },
@@ -335,17 +331,41 @@ INDEX_HTML = r"""<!doctype html>
                 },
                 plugins: { 
                     zoom: { pan: { enabled: true }, zoom: { wheel: { enabled: true }, mode: 'x' } },
-                    tooltip: { 
-                        callbacks: { 
-                            title: (items) => fullTimeFmt.format(new Date(items[0].parsed.x))
-                        } 
-                    }
+                    tooltip: { callbacks: { title: (items) => fullTimeFmt.format(new Date(items[0].parsed.x)) } }
                 }
             }
         });
         chart.data.datasets.forEach((ds, i) => { if(visibleSeries[ds.label] !== undefined) chart.setDatasetVisibility(i, visibleSeries[ds.label]); });
         chart.update();
-      } catch(e) { console.error("Kritiskt fel i initChart:", e); }
+      } catch(e) { console.error("Fel i initChart:", e); }
+    }
+
+    function updateChartsLive(m) {
+        const timestamp = parseToSve(m.measured_at);
+        if (!timestamp || !chart) return;
+
+        // Pusha nya data
+        chart.data.datasets[0].data.push({x: timestamp, y: m.active_power_w});
+        chart.data.datasets[1].data.push({x: timestamp, y: m.active_current_l1_a});
+        chart.data.datasets[2].data.push({x: timestamp, y: m.active_current_l2_a});
+        chart.data.datasets[3].data.push({x: timestamp, y: m.active_current_l3_a});
+        chart.data.datasets[4].data.push({x: timestamp, y: m.voltage_l1_v});
+        chart.data.datasets[5].data.push({x: timestamp, y: m.voltage_l2_v});
+        chart.data.datasets[6].data.push({x: timestamp, y: m.voltage_l3_v});
+
+        // Rensa gamla punkter utanför vyn (för prestanda)
+        const cutoff = new Date(timestamp.getTime() - (currentRangeHours * 3600000));
+        chart.data.datasets.forEach(ds => {
+            while (ds.data.length > 0 && ds.data[0].x < cutoff) ds.data.shift();
+        });
+        chart.update('none');
+
+        // Uppdatera historik-watt om vi tittar på idag
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (document.getElementById('hDate').value === todayStr && hChart) {
+            hChart.data.datasets[0].data.push({x: timestamp, y: m.active_power_w});
+            hChart.update('none');
+        }
     }
 
     async function loadHistory() {
@@ -384,7 +404,7 @@ INDEX_HTML = r"""<!doctype html>
             },
             options: { responsive: true, maintainAspectRatio: false, scales: { yP: { position: 'left' }, yC: { position: 'right' } } }
         });
-      } catch(e) { console.error("Kritiskt fel i loadHistory:", e); }
+      } catch(e) { console.error("Fel i loadHistory:", e); }
     }
 
     const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws');
@@ -403,6 +423,8 @@ INDEX_HTML = r"""<!doctype html>
           const imb = (Math.max(...currents) - Math.min(...currents)).toFixed(1);
           document.getElementById('phase-imbalance').innerText = imb + ' A';
           if(pie) { pie.data.datasets[0].data = currents; pie.update('none'); }
+          
+          updateChartsLive(m);
       } catch(e) {}
     };
 
